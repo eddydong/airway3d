@@ -14,6 +14,32 @@ a static Three.js page renders it. **CT screenshot stacks, patient photographs,
 and generated meshes/volumes are not in this repository** — keep them on the
 machine that runs the pipeline.
 
+## Congestion: a chain, not one score
+
+The lab is built around how posture, geometry and cooling connect. They are not
+three independent “key factors” for the same quantity, and none of them is a
+patient 0–10 rating.
+
+1. **Body position** can change assumed mucosal swelling plus a small gravity
+   displacement. Face-up is the CT. Side-lying and upright are sensitivity
+   tests: this one screenshot series cannot measure those tissue responses, and
+   lateral posture also includes reflex vascular effects, not just hydrostatic
+   wall shift.
+2. **Minimum cross-section** is the geometric bottleneck. Narrower MCA raises
+   **resistance**; the live congestion proxy is isolated nasal resistance at
+   150 Pa, not MCA itself.
+3. **Mucosal heat flux** is a literature correlate of *perceived* openness
+   (cooling of the lining). The live readout is a tube-model estimate of cooled
+   area above 50 W/m²; recorded 3-D CFD walls are a separate sensible-heat
+   library. Humidity and evaporation are not solved.
+
+In short: assumed posture response can change geometry → MCA changes
+resistance/flow (how hard air is to move) → flow over mucosa changes heat flux
+(a correlate of feeling clear). The numbers are model outputs for matched
+what-if comparisons, not a predicted symptom score. See
+[docs/CFD_VALIDATION.md](docs/CFD_VALIDATION.md) and
+[docs/THERMAL_PLAYBACK.md](docs/THERMAL_PLAYBACK.md).
+
 ## Layout
 
 ```
