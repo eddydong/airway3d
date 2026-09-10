@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>airway3d — head reconstruction & airway lab</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="./style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/": "./vendor/addons/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<nav id="rail" aria-label="Panels">
+  <button class="tab" data-panel="scenario-lab" aria-pressed="true" title="Scenario lab">Scenario lab</button>
+  <button class="tab" data-panel="left" aria-pressed="false" title="Tissues and render">Tissues · render</button>
+  <button class="tab" data-panel="right" aria-pressed="true" title="View and airflow">View · flow</button>
+</nav>
+<div id="dock">
+<aside id="scenario-lab" class="panel" aria-label="Scenario lab"></aside>
+<aside id="left" class="panel stowed">
+  <header>
+    <h1>airway3d</h1>
+    <div class="sub" id="dataset-line">
+      <span id="dataset-status" role="status">Loading CT reference…</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Presets</h2>
+    <div class="presets" id="presets"></div>
+  </section>
+
+  <section>
+    <h2>Tissues <span class="hint">visibility · colour · opacity</span></h2>
+    <div id="tissues"></div>
+  </section>
+
+  <section>
+    <h2>Render</h2>
+    <div class="row">
+      <label>Mode</label>
+      <div class="seg" id="mode">
+        <button data-v="surface" class="on">Surfaces</button>
+        <button data-v="volume">Volume</button>
+        <button data-v="hybrid">Hybrid</button>
+      </div>
+    </div>
+    <div class="row"><label>Exposure</label><input type="range" id="exposure" min="0.3" max="2.5" step="0.01" value="1.0" /></div>
+    <div class="row"><label>Volume density</label><input type="range" id="density" min="0.1" max="4" step="0.01" value="1.2" /></div>
+    <div class="row"><label>Volume quality</label><input type="range" id="quality" min="0.5" max="2" step="0.1" value="1" /></div>
+    <div class="row"><label>Background</label><input type="color" id="bg" value="#0b0d12" /></div>
+    <div class="row"><label></label><button id="shot" class="small">Save screenshot</button></div>
+  </section>
+</aside>
+
+<aside id="right" class="panel">
+  <section>
+    <h2>Cut planes <span class="hint">dig inside · CT slice shown at the cut</span></h2>
+    <div id="cuts"></div>
+    <div class="row"><label>Slice overlay</label>
+      <div class="seg" id="slicemode">
+        <button data-v="ct" class="on">CT</button>
+        <button data-v="labels">Labels</button>
+        <button data-v="off">Off</button>
+      </div>
+    </div>
+    <div class="row"><label>CT window</label>
+      <div class="seg" id="window">
+        <button data-v="soft" class="on">Soft tissue</button>
+        <button data-v="bone">Bone</button>
+        <button data-v="auto">Per tissue</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="airway-sec">
+    <h2>Airway <span class="hint">nostrils → pharynx</span></h2>
+    <div id="airway-stats" class="stats">loading…</div>
+    <p id="chart-source" class="hint">Cross-section profile</p>
+    <canvas id="chart" width="330" height="170" aria-label="Airway cross-sectional area versus distance from nostril"></canvas>
+    <div class="legend"><span class="sw" style="background:#ff7a59"></span>left nostril · <span class="sw" style="background:#59b6ff"></span>right nostril · <span class="sw" style="background:#c9d1d9"></span>pharynx</div>
+  </section>
+
+  <section id="flow-sec">
+    <h2>Airflow <span class="hint">live tube estimate · particles</span></h2>
+    <div class="row"><label>Particles</label><input type="checkbox" id="flow-on" /></div>
+    <div class="row"><label>Breathing animation</label><input type="checkbox" id="flow-breathe" checked /><span class="val" id="flow-phase">ready</span></div>
+    <div class="row"><label>Breath period</label><input type="range" id="flow-period" min="2" max="30" step="1" value="4" /><span class="val" id="flow-period-val">4 s</span></div>
+    <div class="row"><label>Peak flow</label><input type="range" id="flow-q" min="50" max="1000" step="10" value="250" /><span class="val" id="flow-q-val">250 mL/s</span></div>
+    <div class="row"><label>Look</label><select id="flow-style"></select></div>
+    <div class="row"><label>Colour by</label><select id="flow-color"><option value="speed">speed</option><option value="side">nostril · left / right / pharynx</option><option value="thermal">mucosal heat flux · inspiration</option></select></div>
+    <p class="hint" id="flow-color-note">Thermal colour uses the live tube-model mucosal heat-flux estimate during inspiration. Recorded 3-D CFD walls are a separate display.</p>
+    <div id="flow-thermal-legend" aria-label="Thermal particle colour scale"><span>0 W/m²</span><i></i><span>scenario peak</span></div>
+    <div class="row"><label>Thermal walls</label><input type="checkbox" id="flow-thermal-walls" checked /><span class="val">airway overlay</span></div>
+    <div class="row"><label>Size</label><input type="range" id="flow-size" min="0.3" max="3" step="0.1" value="1" /></div>
+    <div class="row"><label>Count</label><input type="range" id="flow-n" min="1000" max="40000" step="1000" value="8000" /></div>
+    <div class="row"><label>Speed</label><input type="range" id="flow-speed" min="0.005" max="1" step="0.005" value="0.06" /></div>
+    <div class="row"><label>Trail</label><input type="range" id="flow-trail" min="0" max="0.98" step="0.01" value="0.85" /></div>
+    <div id="flow-stats" class="stats"></div>
+  </section>
+
+  <footer class="hint">Drag: orbit · Right-drag: pan · Wheel: zoom · <kbd>R</kbd> reset · <kbd>1-6</kbd> presets</footer>
+</aside>
+</div>
+<dialog id="scenario-report" aria-label="Scenario comparison report"></dialog>
+
+<div id="hud"></div>
+<div id="loading"><div class="bar"><div id="loadbar"></div></div><div id="loadtext">loading…</div></div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

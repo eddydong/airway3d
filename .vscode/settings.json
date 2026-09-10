@@ -1,0 +1,19 @@
+{
+  "files.watcherExclude": {
+    "**/.venv/**": true,
+    "**/.venv-face/**": true,
+    "**/__pycache__/**": true,
+    "**/work/**": true,
+    "**/slices/**": true,
+    "**/viewer/data/**": true,
+    "**/viewer/vendor/**": true
+  },
+  "search.exclude": {
+    "**/.venv": true,
+    "**/.venv-face": true,
+    "**/work": true,
+    "**/slices": true,
+    "**/viewer/data": true,
+    "**/viewer/vendor": true
+  }
+}

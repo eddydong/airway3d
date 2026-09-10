@@ -1,0 +1,21 @@
+# Heavy generated / binary trees. Keep pipeline/, viewer/*.js, skin/, and
+# *.json readable so an in-flight agent can still open them.
+
+.venv/
+.venv-face/
+__pycache__/
+.DS_Store
+
+# NumPy volumes from the pipeline (~750 MB)
+work/
+
+# CT screenshot stacks (~530 MB of 1235×1498 PNGs)
+slices/**/*.png
+
+# Generated viewer payloads; JSON sidecars stay visible
+viewer/data/**/*.bin
+viewer/data/**/*.glb
+viewer/data/**/*.npy
+
+# Vendored Three.js (do not re-index)
+viewer/vendor/

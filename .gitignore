@@ -1,0 +1,26 @@
+.venv/
+.venv-face/
+work/
+viewer/data/
+__pycache__/
+.DS_Store
+tmp/
+
+# Patient CT screenshot stacks and photographs — local only, never publish
+*.heic
+*.HEIC
+*.dcm
+*.nii
+*.nii.gz
+*.nrrd
+slices/**/*.png
+slices/**/*.jpg
+slices/**/*.jpeg
+slices/**/*.tif
+slices/**/*.tiff
+skin/**/*.jpg
+skin/**/*.jpeg
+skin/**/*.png
+skin/**/*.webp
+skin/**/*.tif
+skin/**/*.tiff

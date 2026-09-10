@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Viewer render benchmark</title>
+<style>body{background:#10151d;color:#e6edf5;font:16px system-ui}iframe{width:850px;height:480px;border:0}pre{white-space:pre-wrap}</style></head>
+<body><h1>Actual viewer render benchmark</h1><p id="status" role="status">Loading…</p><pre id="results"></pre><iframe src="../" title="Viewer under test"></iframe><script type="module">
+const frame=document.querySelector('iframe'),status=document.querySelector('#status');
+const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+try{
+  const start=performance.now();let app;
+  while(!(app=frame.contentWindow.__app)?.lab?.cfd?.thermal){if(performance.now()-start>60000)throw Error('Viewer did not load');await nextFrame();}
+  app.renderer.setAnimationLoop(null);app.controls.enableDamping=false;app.lab.cfd.particles.playbackPaused=true;
+  let sortMs=0;
+  app.surfaces.traverse(mesh=>{if(!mesh.isMesh||!mesh.onBeforeRender)return;const original=mesh.onBeforeRender;mesh.onBeforeRender=function(...args){const t=performance.now();original.apply(this,args);sortMs+=performance.now()-t;};});
+  const rows=[],origin=app.camera.position.clone(),axis=new app.THREE.Vector3(0,1,0);
+  for(const preset of ['Airway','Dissect']){
+    status.textContent='Benchmarking '+preset+' rotation…';app.applyPreset(preset);
+    const samples=[];
+    for(let i=0;i<30;i++){
+      await nextFrame();sortMs=0;
+      app.camera.position.copy(origin).sub(app.controls.target).applyAxisAngle(axis,(i+1)*.012).add(app.controls.target);
+      const t=performance.now();app.render();const renderMs=performance.now()-t;
+      if(i>=6)samples.push({renderMs,sortMs});
+    }
+    const average=key=>Math.round(samples.reduce((sum,s)=>sum+s[key],0)/samples.length*10)/10;
+    rows.push({preset,frames:samples.length,renderCpuMs:average('renderMs'),faceSortCpuMs:average('sortMs'),triangles:app.renderer.info.render.triangles});
+    document.querySelector('#results').textContent=JSON.stringify(rows,null,2);
+  }
+  status.textContent='Complete · CPU time per rendered frame (not a GPU FPS measurement)';
+}catch(error){status.textContent='FAIL · '+error.message;console.error(error);}
+</script></body></html>

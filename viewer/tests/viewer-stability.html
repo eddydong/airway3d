@@ -1,0 +1,30 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Viewer stability regression</title>
+<style>body{background:#10151d;color:#e6edf5;font:16px system-ui}iframe{width:850px;height:480px;border:0}li{margin:8px 0}</style></head>
+<body><h1>Actual viewer stability</h1><p id="status" role="status">Loading the viewer and thermal recording…</p><ul id="results"></ul><iframe src="../" title="Viewer under test"></iframe><script type="module">
+const frame=document.querySelector('iframe'),status=document.querySelector('#status');
+const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+const changed=(a,b)=>{let n=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])n++;return n/a.length;};
+let count=0;
+function check(name,condition){if(!condition)throw Error(name);count++;const li=document.createElement('li');li.textContent='PASS · '+name;document.querySelector('#results').append(li);}
+try{
+  const start=performance.now();let app;
+  while(!(app=frame.contentWindow.__app)?.lab?.cfd?.thermal){if(performance.now()-start>60000)throw Error('Viewer did not load its thermal recording');await nextFrame();}
+  app.renderer.setAnimationLoop(null);app.controls.enableDamping=false;
+  app.lab.cfd.particles.playbackPaused=true;app.applyPreset('Airway');
+  const capture=()=>{app.render();const gl=app.renderer.getContext(),data=new Uint8Array(gl.drawingBufferWidth*gl.drawingBufferHeight*4);gl.readPixels(0,0,gl.drawingBufferWidth,gl.drawingBufferHeight,gl.RGBA,gl.UNSIGNED_BYTE,data);return data;};
+  for(const opacity of [1,.5]){
+    app.lab.cfd.thermal.setOpacity(opacity);capture();const first=capture();let difference=0;
+    for(let i=0;i<12;i++){await nextFrame();difference=Math.max(difference,changed(first,capture()));}
+    check(`paused viewer at ${opacity*100}% wall opacity is pixel-identical across 12 frames`,difference===0);
+    const position=app.camera.position.clone();
+    for(let i=1;i<=8;i++){app.camera.position.copy(position).sub(app.controls.target).applyAxisAngle(new app.THREE.Vector3(0,1,0),i*.06).add(app.controls.target);capture();await nextFrame();}
+    const rotated=capture();check(`camera rotation at ${opacity*100}% shows a different view`,changed(first,rotated)>.01);
+    let rotatingDifference=0;for(let i=0;i<5;i++){await nextFrame();rotatingDifference=Math.max(rotatingDifference,changed(rotated,capture()));}
+    check(`new camera position at ${opacity*100}% is stable immediately`,rotatingDifference===0);
+    app.camera.position.copy(position);capture();
+    check(`returning the camera at ${opacity*100}% restores the image`,changed(first,capture())<.001);
+  }
+  check('viewer has no runtime or shader errors',frame.contentWindow.__errors.length===0);
+  status.textContent=`PASS · ${count} actual viewer checks`;
+}catch(error){status.textContent='FAIL · '+error.message;console.error(error);}
+</script></body></html>
