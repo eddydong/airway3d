@@ -1,8 +1,6 @@
 # airway3d — head reconstruction & nasal airway lab
 
-<video src="https://github.com/eddydong/airway3d/raw/main/docs/airway3d_720.mp4" controls muted playsinline width="720"></video>
-
-[Preview video (720p)](docs/airway3d_720.mp4)
+https://github.com/user-attachments/assets/5a56d3e5-0b55-4e4e-bd84-d761ea22dac1
 
 A 3-D reconstruction of one patient's head from 209 CT viewer screenshots, with a
 browser viewer that separates skin, fat, muscle, soft tissue, bone, brain, eyeballs,
