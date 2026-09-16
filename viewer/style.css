@@ -256,8 +256,7 @@ button:disabled { opacity:.45; cursor:wait; }
 #flow-sec .row[hidden], #cfd-panel [hidden] { display:none !important; }
 .cfd-mode #congestion-monitor, .cfd-mode #thermal-monitor, .cfd-mode #scenario-live,
 .cfd-mode #live-context, .cfd-mode #preview-note, .cfd-mode #compare-scenarios,
-.cfd-mode #compare-scenarios + p, .cfd-mode .fidelity, .cfd-mode #play-posture,
-.cfd-mode #play-posture + p, .cfd-mode [data-source="post"] { display: none !important; }
+.cfd-mode #compare-scenarios + p, .cfd-mode .fidelity, .cfd-mode [data-source="post"] { display: none !important; }
 
 #cfd-panel .cfd-options { flex-wrap:wrap; gap:8px; }
 #cfd-panel .cfd-options label { min-width:110px; }
@@ -285,3 +284,13 @@ button:disabled { opacity:.45; cursor:wait; }
 #cfd-surface-row .name { grid-column: 2 / -1; flex-direction: column; align-items: flex-start; gap: 3px; }
 #cfd-surface-row .name .vol { margin-left: 0; }
 #cfd-surface-row .ctrl { display: block; }
+
+/* Exact CFD requests are selected as a complete recording, never free-form edits. */
+.cfd-mode .estimated-scenario-controls,
+.cfd-mode .dataset-buttons,
+.cfd-mode #lab-source-status,
+.cfd-mode #reset-scenario,
+.cfd-mode #cfd-panel .cfd-options,
+.cfd-mode #cfd-method-note { display: none !important; }
+.cfd-recording-picker { display: block; font-size: 12px; color: #d9e5f5; margin: 12px 0 6px; }
+.cfd-recording-picker select { display: block; width: 100%; margin-top: 7px; padding: 10px 7px; background: #111925; color: #edf2fa; border: 1px solid #46556a; border-radius: 5px; }

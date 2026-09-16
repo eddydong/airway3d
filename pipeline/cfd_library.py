@@ -41,6 +41,23 @@ def scenario_requests(base,plans,positions):
     return out
 
 
+def control_point_requests(base):
+    """Small, discrete menu: baseline positions plus isolated 1 mm clearances.
+
+    No Cartesian product and no interpolated combinations. Each new entry has
+    a complete two-cycle solve at the requested numerical settings.
+    """
+    from cfd_service import DEFAULTS
+    scenarios=scenario_requests(base,[],POSITIONS)
+    for side in ['L','R']:
+        for region in ['head','body','valve']:
+            settings=json.loads(json.dumps(DEFAULTS))
+            settings['operations'][side][region]=1
+            scenarios.append(dict(name=f'{side} {region} +1 mm',position='supine',baseline=False,
+                                  request=dict(base,settings=settings)))
+    return scenarios
+
+
 class LocalService:
     def __init__(self):
         from cfd_service import CFDService
@@ -62,6 +79,8 @@ def main(argv=None):
     p.add_argument('--grid',type=float,default=.7,choices=[.5,.7],help='reconstruction grid, mm')
     p.add_argument('--positions',default=','.join(POSITIONS))
     p.add_argument('--plans',type=Path,help='JSON list of {name, settings} saved plans')
+    p.add_argument('--control-points',action='store_true',help='four baseline postures + six isolated left/right 1 mm clearance scenarios')
+    p.add_argument('--export-requests',type=Path,help='write the exact scenario requests without starting solvers')
     p.add_argument('--status',action='store_true',help='report library state without queueing')
     args=p.parse_args(argv)
     sys.path.insert(0,str(Path(__file__).resolve().parent))
@@ -71,7 +90,13 @@ def main(argv=None):
     positions=[s.strip() for s in args.positions.split(',') if s.strip()]
     unknown=[s for s in positions if s not in POSITIONS]
     if unknown:p.error(f'unknown positions {unknown}; choose from {POSITIONS}')
-    scenarios=scenario_requests(base,plans,positions)
+    if args.control_points and (args.plans or args.cycles!=2 or args.positions!=','.join(POSITIONS)):
+        p.error('--control-points uses its own positions/plans and requires two cycles')
+    scenarios=control_point_requests(base) if args.control_points else scenario_requests(base,plans,positions)
+    if args.export_requests:
+        args.export_requests.parent.mkdir(parents=True,exist_ok=True)
+        args.export_requests.write_text(json.dumps(scenarios,indent=2))
+        print(f'Wrote {len(scenarios)} exact scenarios to {args.export_requests}');return 0
     service,where=LocalService(),'offline process'
     print(f'{len(scenarios)} scenarios via {where}')
     for s in scenarios:
@@ -93,7 +118,11 @@ def main(argv=None):
             if s['id'] not in pending:continue
             job=service.poll(s['id']);state=job.get('state')
             if state in ['complete','unconverged','failed','cancelled','missing']:
-                pending.discard(s['id']);print(f"  {s['position']:8s} {s['name']:32s} {state:12s} {job.get('message','')}",flush=True)
+                pending.discard(s['id']);
+                if state=='complete':
+                    from cfd_catalog import build_catalog
+                    build_catalog()
+                print(f"  {s['position']:8s} {s['name']:32s} {state:12s} {job.get('message','')}",flush=True)
             elif state=='solving':print(f"  … {s['position']} {s['name']}: {job.get('message','')}",end='\r',flush=True)
     accepted=sum(service.poll(s['id']).get('state')=='complete' for s in scenarios)
     print(f'{accepted}/{len(scenarios)} scenarios accepted and ready for instant replay')

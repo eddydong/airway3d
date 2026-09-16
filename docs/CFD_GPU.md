@@ -136,19 +136,43 @@ flattening, the full result schema and the mass gate without needing a GPU.
 
 ## Using the library
 
-Start the read-only viewer with `make serve`. The **Solver** defaults to GPU
-lattice recordings; the local GPU backend is not required for playback.
-**Compare plans × body positions with CFD** loads saved rows from the static
-catalog. Missing scenarios must be prepared offline:
+Start the read-only viewer with `make serve`. **Solved scenario** lists complete
+accepted recordings. Four body-position buttons select a whole matching request;
+if a period/intervention combination is unavailable in the new position, the
+menu visibly switches to an existing recording there. Anatomy and breathing
+inputs cannot be edited into unsupported combinations. Particle appearance,
+playback speed, pause and wall display remain adjustable.
+
+Body position has no time-after-turning dimension in the UI. Historical
+`elapsed` and `tau` values remain in request metadata for immutable recording
+identity; the existing default captures a fixed response factor of
+`1 - exp(-10/5)`. Removing a control does not reinterpret already solved fields.
+
+**Compare plans × body positions with CFD** reads separate exact results;
+unavailable comparisons continue to withhold readings. Numerical acceptance
+checks are retained. They do not establish mesh independence or clinical accuracy.
+
+The small discrete expansion has four no-intervention positions and six
+independent face-up changes: left/right head, body, or valve clearance at 1 mm.
+All share 30 Pa, a 4 s breath, a 0.7 mm geometry grid and one lattice cell per
+voxel by default. It does not imply support for combined interventions or for
+these interventions in every position. Publish each additional recording only
+after its own solve passes the numerical checks:
 
 ```sh
 .venv/bin/python pipeline/gpu_cfd_build.py                      # once
 .venv/bin/python pipeline/cfd_library.py --status               # what exists
+.venv/bin/python pipeline/cfd_library.py --control-points --export-requests work/cfd/discrete-control-points.json
+.venv/bin/python pipeline/cfd_library.py --control-points         # 4 existing baselines + 6 isolated 1 mm clearances
 .venv/bin/python pipeline/cfd_library.py                        # 4 positions × no intervention
 .venv/bin/python pipeline/cfd_library.py --plans plans.json     # + saved plans
 .venv/bin/python pipeline/cfd_thermal.py --all                  # wall temperatures/heat flux
 .venv/bin/python pipeline/cfd_catalog.py                        # static catalog
 ```
+
+The batch publishes accepted airflow results individually as it progresses.
+Refresh saved library to see them. New cases have airflow only until the separate
+thermal script has completed; the viewer explicitly withholds missing wall temperatures.
 
 Playback preloads and loops the second recorded cycle. Fractional playback time
 is preserved across saved frames and the loop boundary is checked against the

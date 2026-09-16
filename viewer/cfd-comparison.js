@@ -81,7 +81,7 @@ export class CFDComparison {
       const tr=document.createElement('tr');
       tr.innerHTML=`<td>${escape(row.positionLabel)}<br><strong>${escape(row.name)}</strong></td><td>${escape(row.job?.message||'Checking…')}</td><td>${fmt(reading?.pressure)}</td>${this.lattice?`<td>${fmt(total(reading))}</td><td>${fmt(delta)}</td>`:`<td>${fmt(delta)}</td>`}<td>${fmt(reading?.flow.L)} / ${fmt(reading?.flow.R)}</td><td></td>`;
       const actions=tr.lastElementChild,view=document.createElement('button');view.textContent='View geometry / flow';
-      view.onclick=()=>{this.dialog.close();this.cfd.lab.settings=clone(row.request.settings);this.cfd.lab.sync();this.cfd.changed();};actions.append(view);
+      view.onclick=()=>{this.dialog.close();this.cfd.chooseRecording(row.job);};actions.append(view);
       view.disabled=!row.result;tbody.append(tr);
     });
   }

@@ -54,9 +54,13 @@ docs/airway3d_720.mp4   viewer preview
 ## Offline playback and wall temperature
 
 The viewer is now read-only: it loads precomputed CFD and thermal recordings
-from a static catalog and cannot submit jobs. Missing settings show **Not
-precomputed** immediately. The four baseline body positions and the extra 2 s
-face-up recording have offline airflow results. **Airway wall display** plays
+from a static catalog and cannot submit jobs. **Solved scenario** selects a
+complete accepted recording, keeping anatomy, tissue assumptions, pressure and
+breath period matched. Four body-position buttons select recorded configurations.
+Unsupported free-form inputs are hidden in CFD mode; playback and display
+controls remain live. No interpolation between scenarios is used. The four
+baseline body positions, a 2 s face-up recording, and six isolated face-up
+1 mm clearances have offline airflow results. **Airway wall display** plays
 computed surface temperature (°C) and sensible mucosal heat flux (W/m²) from
 3-D energy transport coupled to a finite-capacity warm tissue layer. The new
 **CFD airway · solver surface** tissue row controls visualization only.
@@ -104,14 +108,15 @@ The head stays visible throughout scenario changes:
   recall preserves current physiology assumptions so comparisons remain matched.
 - **Body position** supports face up (the confirmed CT reference), left side,
   right side and upright. Adjust assumed dependent swelling, immediate radial
-  displacement, cycle bias and settling time; play the response over time.
+  displacement and cycle bias. Position is a static four-way choice; there is
+  no time-after-turning or settling-time control.
   The reported left-side blockage preset is an illustrative sensitivity test.
   These tissue responses cannot be measured from this one PNG series.
 - A **Congestion proxy** stays pinned above the lab controls. It shows left/right
   estimated resistance at 150 Pa (Pa·s/mL), plus each side's percentage change
   from the observed face-up CT. Higher means less airflow at the same pressure;
-  closed branches display **Closed**. It updates with intervention, posture,
-  swelling and playback changes, including saved-dataset switches. The fixed
+  closed branches display **Closed**. It updates with intervention, posture and
+  swelling changes, including saved-dataset switches. The fixed
   pressure makes it independent of particle speed, breathing phase and peak flow.
   This is not a patient symptom score. **About** explains patient-rated 0–10
   congestion and the role of mucosal cooling. The adjacent panel and the particle

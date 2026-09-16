@@ -42,7 +42,7 @@ export class ScenarioLab {
       <div class="dataset-buttons"><button class="small on" data-source="pre">CT · face up</button><button class="small" data-source="post">Saved 2 mm reduction</button></div>
       <p id="lab-source-status" class="hint" role="status">CT reference · face up</p>
       <p class="model-note" id="scenario-model-note">${TUBE_GEOMETRY_NOTE}</p>
-      <section><h2>Intervention</h2>
+      <section class="estimated-scenario-controls"><h2>Intervention</h2>
         <label class="lab-name">Plan name<input id="plan-name" maxlength="48" value="Untitled intervention"></label>
         <div class="region-tabs" role="group" aria-label="Region to highlight">${Object.entries(REGIONS).map(([k,r])=>`<button class="small ${k==='head'?'on':''}" data-region="${k}" style="--region-color:${r.color}">${r.short}</button>`).join('')}</div>
         <p id="region-help" class="hint">${REGIONS.head.help}</p>
@@ -56,18 +56,14 @@ export class ScenarioLab {
         <div class="lab-actions"><button id="clear-intervention" class="small">Clear intervention</button><button id="save-plan" class="small">Save plan</button></div>
         <div id="saved-plans"></div>
       </section>
-      <section><h2>Body position & tissue response</h2>
+      <section class="estimated-scenario-controls"><h2>Body position & tissue response</h2>
         <div class="position-buttons" role="group" aria-label="Body position">${Object.entries(POSITIONS).map(([k,v])=>`<button class="small" data-position="${k}" aria-pressed="${k==='supine'}">${v}</button>`).join('')}</div>
         <p class="hint">Face up is the observed CT. Other positions explore assumed swelling and displacement; these responses are not measured by the scan.</p>
-        ${slider('elapsed','Time in position',0,30,0.5,10,'min')}
-        <button id="play-posture" class="small" aria-pressed="false">Play tissue response</button>
-        <p class="hint">Plays 0–15 minutes in 15 animation seconds. Particle breathing continues independently.</p>
         <details><summary>Adjust unmeasured tissue response</summary>
           ${slider('responseL','Left dependent swelling',0,5,0.1,0.6)}
           ${slider('responseR','Right dependent swelling',0,5,0.1,0.6)}
           ${slider('gravity','Immediate gravity displacement',0,1,0.05,0.15)}
           ${slider('cycle','Nasal cycle bias (positive = left)',-2,2,0.1,0)}
-          ${slider('tau','Vascular settling time',0.5,15,0.5,5,'min')}
           <button id="reported-blockage" class="small">Explore reported left-side blockage</button>
           <p class="hint">This preset assumes stronger left swelling to explore your observation. It does not establish its cause or severity.</p>
         </details><p id="posture-state" class="posture-state"></p>
@@ -87,7 +83,7 @@ export class ScenarioLab {
       <p>Research links perceived openness to <strong>cooling of the nasal lining</strong>. Heat loss and the area of lining cooled by airflow are promising predictors, but no single CFD measure reliably predicts every patient's symptoms. This app does not yet calculate heat transfer or sensory nerve response.</p>
       <p>The live indicator therefore shows <strong>estimated nasal resistance at 150 Pa</strong>: R = 150 ÷ Q at that pressure, in Pa·s/mL. Higher means less air passes for the same pressure. Left and right are evaluated separately, excluding the shared throat.</p>
       <p>The percentage compares each side with its own face-up CT reference. It is a change in resistance, <strong>not a percentage of blockage or a symptom severity score</strong>. No clinical mild/moderate/severe thresholds are assigned. Lower resistance alone does not establish a better surgical outcome.</p>
-      <p>Intervention, posture, swelling and tissue-response playback update the numbers. The test pressure stays at 150 Pa, so changing particle speed, breath phase or peak flow does not change this comparison. A closed branch has infinite resistance and is shown as “Closed.”</p>
+      <p>Intervention, posture and swelling assumptions update the numbers. The test pressure stays at 150 Pa, so changing particle speed, breath phase or peak flow does not change this comparison. A closed branch has infinite resistance and is shown as “Closed.”</p>
       <p>These live numbers are a tube estimate from screenshot anatomy, not measured rhinomanometry: one mean speed per cross-section along each passage (a 1-D pipe calculation). The 3-D picture is a drawing of that estimate. The indicators follow the selected scenario even when CT slices or volume rendering still show the saved scan.</p>
       <p class="congestion-sources"><a href="https://pubmed.ncbi.nlm.nih.gov/22022361/" target="_blank" rel="noreferrer">Cooling and perceived nasal patency (2011)</a><br><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC3917722/" target="_blank" rel="noreferrer">Mucosal cooling and symptoms after surgery (2014)</a></p>`;
     document.body.appendChild(explanation);
@@ -121,12 +117,7 @@ export class ScenarioLab {
     $('#scenario-flow-toggle').onclick=()=>{const cb=$('#flow-on');cb.checked=!cb.checked;this.ctx.flow?.setEnabled(cb.checked);};
     $('#scenario-flow-focus').onclick=()=>{this.ctx.applyPreset('Airway');$('#flow-on').checked=true;this.ctx.flow?.setEnabled(true);};
     root.querySelectorAll('[data-position]').forEach(b=>b.onclick=()=>{this.settings.position=b.dataset.position;this.sync();this.queue();});
-    $('#play-posture').onclick=()=>{
-      if(this.playing){this.stopPlayback();return;}
-      this.settings.elapsed=0;this.playing=true;this.playbackTick=0;
-      $('#play-posture').textContent='Pause tissue response';$('#play-posture').setAttribute('aria-pressed','true');this.sync();this.queue();
-    };
-    $('#reported-blockage').onclick=()=>{this.stopPlayback();Object.assign(this.settings,{position:'left',responseL:4,responseR:0.6,gravity:0.15,cycle:0,tau:5,elapsed:15});this.sync();this.queue();};
+    $('#reported-blockage').onclick=()=>{this.stopPlayback();Object.assign(this.settings,{position:'left',responseL:4,responseR:0.6,gravity:0.15,cycle:0,tau:5,elapsed:10});this.sync();this.queue();};
     $('#focus-region').onclick=()=>{$('#region-guides').checked=true;this.view.focus(this.view.selected,'L');};
     root.querySelectorAll('[data-source]').forEach(b=>b.onclick=async()=>{
       this.stopPlayback(); ++this.queueId;
@@ -190,12 +181,12 @@ export class ScenarioLab {
     this.renderLive(ref);
     $('#preview-note').textContent=this.previewActive?'Live tube estimate: the 3-D drawing stretches stored anatomy; particle width, speed and nostril split follow the tube model. CT slices/volume stay the saved scan. Not a 3-D Navier–Stokes field.':'Face-up CT reference. Particles follow stored streamlines; speed uses the live tube-model flow split.';
     $('#flow-sec h2 .hint').textContent=this.previewActive?'live tube estimate · particles':'stored streamlines · tube-model split';
-    $('#live-context').textContent=`Selected scenario vs no intervention · ${POSITIONS[s.position]} · ${s.elapsed.toFixed(1)} min.`;
+    $('#live-context').textContent=`Selected scenario vs no intervention · ${POSITIONS[s.position]}.`;
   }
   renderLive(ref){
     const m=this.metrics,d=this.data;
-    this.renderCongestion(m,`${POSITIONS[this.settings.position]} · ${this.settings.elapsed.toFixed(1)} min`);
-    this.renderHeatFlux(evaluateHeatFlux(d,m),`${POSITIONS[this.settings.position]} · ${this.settings.elapsed.toFixed(1)} min`);
+    this.renderCongestion(m,`${POSITIONS[this.settings.position]}`);
+    this.renderHeatFlux(evaluateHeatFlux(d,m),`${POSITIONS[this.settings.position]}`);
     const reference=scenarioData(this.ctx.base,noIntervention(this.settings));
     $('#scenario-live').innerHTML=`<div class="live-pressure"><strong>${m.total.blocked?'Infeasible':`${fmt(m.total.dP)} <small>Pa</small>`}</strong><span>nose → pharynx at ${this.ctx.q()} mL/s</span></div>
       <div class="flow-balance" aria-label="Flow distribution"><i style="width:${m.total.deliveredQ?m.L.Q/m.total.deliveredQ*100:0}%"></i></div>
@@ -239,15 +230,9 @@ export class ScenarioLab {
     $('#flow-stats').textContent=`${TUBE_ESTIMATE} · peak split L ${fmt(this.metrics.L.Q)} / R ${fmt(this.metrics.R.Q)} mL/s. Breathing scales and reverses this split along stored streamlines stretched with the wall. Not a 3-D Navier–Stokes field.`;
   }
   flowChanged(){if(this.cfd?.enabled){this.cfd.changed();return;}if(this.ctx.state.dataset==='pre'){this.metrics=evaluate(this.data,this.ctx.q());this.syncParticles();this.renderLive(evaluate(scenarioData(this.ctx.base,noIntervention(this.settings)),this.ctx.q()));}}
-  stopPlayback(){this.playing=false;$('#play-posture').textContent='Play tissue response';$('#play-posture').setAttribute('aria-pressed','false');}
-  step(dt){
-    this.view.step(dt);
-    if(this.playing){
-      this.settings.elapsed=Math.min(15,this.settings.elapsed+dt);this.playbackTick+=dt;
-      if(this.playbackTick>=0.1){this.playbackTick=0;this.sync();this.queue();}
-      if(this.settings.elapsed>=15){this.stopPlayback();this.sync();this.queue();}
-    }
-  }
+  // Kept for mode/dataset transitions; posture is a static four-position choice.
+  stopPlayback(){this.playing=false;}
+  step(dt){this.view.step(dt);}
   openReport(){
     const current={name:this.settings.name.trim()||'Current intervention',settings:clone(this.settings)};
     this.report=buildReport(this.ctx.base,this.settings,[current,...this.saved],this.ctx.q(),this.ctx.state.meta);
@@ -259,7 +244,7 @@ export class ScenarioLab {
       <p class="hint">Select a row to inspect cross-sections and per-side losses, then preview its particle flow. ΔR uses no intervention in the same position. ∞ means prescribed flow is infeasible.</p>
       <div class="report-table-wrap"><table class="report-table"><thead><tr><th>Plan</th><th>Min area L / R<br>mm²</th><th>Total pressure<br>Pa</th><th>Resistance<br>Pa·s/mL</th><th>ΔR<br>Pa·s/mL</th><th>Flow L / R<br>mL/s</th></tr></thead><tbody id="report-rows"></tbody></table></div>
       <section id="report-detail"></section>
-      <details class="report-methods"><summary>Full assumptions, equations and evidence</summary><p>All plans share the same flow rate, elapsed time and tissue-response assumptions. Equivalent radius changes where the selected region overlaps the airway; area scales with radius², perimeter and hydraulic diameter with radius. The downloadable data contains every transformed profile.</p><ul>${this.report.limitations.map(s=>`<li>${html(s)}</li>`).join('')}</ul>${this.report.sources.map(s=>`<p><a href="${s.url}" target="_blank" rel="noreferrer">${html(s.title)}</a></p>`).join('')}</details>
+      <details class="report-methods"><summary>Full assumptions, equations and evidence</summary><p>All plans share the same flow rate and fixed tissue-response assumptions. Equivalent radius changes where the selected region overlaps the airway; area scales with radius², perimeter and hydraulic diameter with radius. The downloadable data contains every transformed profile.</p><ul>${this.report.limitations.map(s=>`<li>${html(s)}</li>`).join('')}</ul>${this.report.sources.map(s=>`<p><a href="${s.url}" target="_blank" rel="noreferrer">${html(s.title)}</a></p>`).join('')}</details>
       </div>`;
     $('#close-report').onclick=()=>dialog.close();
     $('#report-sort').onchange=()=>this.reportRows();

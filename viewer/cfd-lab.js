@@ -4,7 +4,8 @@ import { CFDParticles } from './cfd-particles.js';
 import { CFDTransientParticles } from './cfd-transient-particles.js';
 import { CFDComparison } from './cfd-comparison.js';
 import { cfdAPI } from './cfd-api.js';
-import { CFDLibrary } from './cfd-library.js';
+import { CFDLibrary, libraryKey, normalizedRequest } from './cfd-library.js';
+import { availableRecordings, catalogRecording, recordingLabel, recordingDetails, selectRecording, recordingForPosition } from './cfd-recordings.js';
 import { CFDThermalWalls, WALL_COLOR_BANDS } from './cfd-thermal.js';
 import { setSurfaceOpacity } from './surface-material.js';
 import { sortTransparentFaces, nestedSurfaceOrder } from './surface-order.js';
@@ -20,6 +21,12 @@ export function cfdPanelMarkup(){
       </div>
       <p id="cfd-mode-note" class="model-note">${RECORDED_CFD_NOTE_TRANSIENT}</p>
       <div id="cfd-recording-ui">
+      <div id="cfd-positions" class="position-buttons" role="group" aria-label="Recorded body position">
+        <button class="small" data-cfd-position="supine" disabled>Face up</button><button class="small" data-cfd-position="left" disabled>Left side down</button><button class="small" data-cfd-position="right" disabled>Right side down</button><button class="small" data-cfd-position="upright" disabled>Upright</button>
+      </div>
+      <label class="cfd-recording-picker" for="cfd-recording">Solved scenario<select id="cfd-recording" aria-label="Solved scenario" disabled><option>Loading saved scenarios…</option></select></label>
+      <p id="cfd-recording-details" class="hint"></p>
+      <p class="model-note">Choose a complete solved scenario. Anatomy, tissue response and breathing settings travel together. Only recordings that passed the required numerical checks are listed; settings between them are not interpolated.</p>
       <div class="cfd-options"><label>Solver<select id="cfd-backend"><option value="gpu-lbm">GPU lattice · LES, pressure-driven</option><option value="openfoam">OpenFOAM · CPU, flow-driven</option></select></label>
       <label>Simulation<select id="cfd-temporal"><option value="steady">Steady flow</option><option value="transient">Recorded breathing cycle</option></select></label>
       <label id="cfd-period-row" hidden>Breath period (s)<input id="cfd-period" type="number" min="2" max="10" step="0.5" value="4"></label>
@@ -29,7 +36,7 @@ export function cfdPanelMarkup(){
       <label id="cfd-direction-row">Flow direction<select id="cfd-direction"><option value="inspiration">Inspiration</option><option value="expiration">Expiration</option></select></label></div>
       <p class="hint" id="cfd-method-note">Each geometry cell is subdivided for the solver. Rigid, no-slip walls; laminar Navier–Stokes. Both nostrils share ambient pressure.</p>
       <p id="cfd-geometry-status" class="hint" role="status"></p>
-      <p class="hint">The viewer only reads saved recordings. Changing settings never starts a geometry build or a solver. Knobs that leave the wall unchanged reuse the same recording. Missing scenarios must be prepared offline.</p>
+      <p class="hint">The viewer only reads saved recordings. New choices are prepared offline and appear after Refresh saved library. Use Live tube estimate to explore continuous settings. Numerical acceptance does not establish mesh independence or patient-specific accuracy.</p>
       <div id="cfd-wall-controls"><label>Airway wall display<select id="cfd-wall-mode"><option value="temperature">Temperature · °C</option><option value="flux">Mucosal sensible heat flux · W/m²</option><option value="surface">Plain surface</option></select></label>
       <p id="cfd-thermal-status" class="hint" role="status">Checking recorded 3-D wall temperatures…</p>
       <label id="cfd-wall-scale-row">Color scale<select id="cfd-wall-scale"><option value="detail">Detail bands · enhanced contrast</option><option value="linear">Linear scale</option></select></label>
@@ -95,13 +102,69 @@ export class CFDLab {
     $('#cfd-compare').onclick=()=>this.comparison.open();
     $('#cfd-replay').onclick=()=>{if(this.thermal){this.particles.time=this.particles.frames[this.particles.loopStart].timeS;this.particles.frame=this.particles.loopStart;this.particles.ended=false;}else this.particles?.replay?.();};
     $('#cfd-grid').onchange=()=>this.changed();$('#cfd-direction').onchange=()=>this.changed();
-    $('#cfd-check').onclick=()=>{this.library.promise=null;this.changed();};
+    $('#cfd-positions').onclick=e=>{const button=e.target.closest('[data-cfd-position]');if(!button)return;const entry=recordingForPosition(this.recordings||[],this.request(),button.dataset.cfdPosition);if(entry)this.chooseRecording(entry);};
+    $('#cfd-recording').onchange=e=>{const entry=this.recordings?.find(r=>r.id===e.target.value);if(entry)this.chooseRecording(entry);};
+    $('#cfd-check').onclick=()=>this.refreshRecordings();
     this.mountSurfaceControl();
     this.toggle(true);
 
   }
   backend(){return $('#cfd-backend').value;}
+  async refreshRecordings(){
+    const revision=this.catalogRevision=(this.catalogRevision||0)+1;
+    this.library.promise=null;
+    const picker=$('#cfd-recording');picker.disabled=true;
+    try{
+      const entries=availableRecordings(await this.library.entries());
+      if(revision!==this.catalogRevision||!this.enabled)return;
+      this.recordings=entries;picker.replaceChildren();
+      for(const entry of entries){
+        const option=document.createElement('option');option.value=entry.id;option.textContent=recordingLabel(entry);
+        option.title=recordingDetails(entry);picker.append(option);
+      }
+      const selected=selectRecording(entries,this.request());
+      if(!selected){
+        const option=document.createElement('option');option.textContent='No accepted recordings available';picker.append(option);
+        $('#cfd-recording-details').textContent='Prepare scenarios offline, then refresh the saved library.';
+        this.selectedRecording=null;document.querySelectorAll('[data-cfd-position]').forEach(button=>{button.disabled=true;button.classList.remove('on');button.setAttribute('aria-pressed','false');});
+        this.changed({force:true});return;
+      }
+      picker.disabled=false;this.chooseRecording(selected,{force:true});
+    }catch(e){
+      if(revision===this.catalogRevision&&this.enabled){
+        picker.disabled=!this.recordings?.length;
+        $('#cfd-status').textContent=e.message;
+      }
+    }
+  }
+  chooseRecording(entry,{force=false}={}){
+    const catalog=catalogRecording(this.recordings,entry);
+    if(!this.enabled||!catalog)return;
+    const r=normalizedRequest(catalog.request),lattice=r.backend==='gpu-lbm';
+    this.lab.stopPlayback();
+    this.lab.settings={...r.settings,name:'Recorded scenario'};
+    $('#cfd-backend').value=lattice?'gpu-lbm':'openfoam';
+    $('#cfd-temporal').value=r.mode==='transient'?'transient':'steady';
+    $('#cfd-period').value=r.periodS??4;$('#cfd-pressure').value=r.pressurePa??30;
+    $('#cfd-grid').value=r.spacingMm;$('#cfd-refine').value=r.refinement??1;
+    $('#cfd-direction').value=r.direction==='expiration'?'expiration':'inspiration';
+    if(!lattice){$('#flow-q').value=r.qMlS;$('#flow-q-val').textContent=`${r.qMlS} mL/s`;}
+    this.selectedRecording=catalog;$('#cfd-recording').value=catalog.id;
+    $('#cfd-recording-details').textContent=recordingDetails(catalog);
+    document.querySelectorAll('[data-cfd-position]').forEach(button=>{
+      const position=button.dataset.cfdPosition,on=r.settings.position===position;
+      button.classList.toggle('on',on);button.setAttribute('aria-pressed',String(on));
+      button.disabled=!this.recordings.some(e=>normalizedRequest(e.request).settings.position===position);
+    });
+    this.lab.sync();this.modeControls();this.changed({force});
+  }
+  lockScenarioControls(){
+    // The editable controls belong to the tube estimate. In recorded mode all
+    // physical inputs are supplied atomically by the selected catalog request.
+    document.querySelectorAll('#scenario-lab [data-op], #scenario-lab [data-setting], #scenario-lab [data-position], #scenario-lab [data-source], #scenario-lab [data-recall], #clear-intervention, #reset-scenario, #reported-blockage, #cfd-panel .cfd-options input, #cfd-panel .cfd-options select, #flow-q').forEach(el=>{el.disabled=this.enabled;});
+  }
   request(){
+    if(this.enabled&&this.selectedRecording)return structuredClone(this.selectedRecording.request);
     const lattice=this.backend()==='gpu-lbm',mode=lattice?'transient':$('#cfd-temporal').value;
     if(lattice)return JSON.parse(JSON.stringify({settings:this.lab.settings,backend:'gpu-lbm',pressurePa:+$('#cfd-pressure').value,
       spacingMm:+$('#cfd-grid').value,refinement:+$('#cfd-refine').value,mode,periodS:+$('#cfd-period').value}));
@@ -118,7 +181,7 @@ export class CFDLab {
     $('#cfd-pressure-row').hidden=!lattice;$('#cfd-refine-row').hidden=!lattice;
     $('#cfd-method-note').textContent=lattice?'GPU lattice Boltzmann (FluidX3D, D3Q19 TRT) with Smagorinsky eddy viscosity: a large-eddy simulation on the rigid voxel wall. Recorded throat pressure drives flow against ambient nostrils; flow rates and the left/right split are results, not inputs. Two recorded cycles from rest.'
       :transient?'Time-dependent, laminar Navier–Stokes. Smooth asymmetric resting-breath drive, ambient nostril pressure; two recorded cycles from rest. Rigid, no-slip walls.':'Rigid, no-slip walls; steady laminar Navier–Stokes. Both nostrils share ambient pressure.';
-    this.syncModeCopy(transient);
+    this.syncModeCopy(transient);this.lockScenarioControls();
     const flowRow=$('#flow-q').closest('.row');flowRow.hidden=this.enabled&&lattice;
     flowRow.querySelector('label').textContent=this.enabled?(transient?'Recorded peak flow':'Recorded flow rate'):'Peak flow';
   }
@@ -196,9 +259,9 @@ export class CFDLab {
       }
       this.originalFlow=this.ctx.flow;this.originalFlow?.setEnabled(false);
       this.ctx.setFlow(null);this.ctx.airwayPanel.setCFD(null,'No matching recorded 3-D field');
-      if(this.ctx.state.dataset!=='pre')this.ctx.loadDataset('pre').then(()=>this.changed());else this.changed();
+      if(this.ctx.state.dataset!=='pre')this.ctx.loadDataset('pre').then(loaded=>{if(loaded)this.refreshRecordings();});else this.refreshRecordings();
     }else{
-      ++this.generation;this.clear();this.ctx.setFlow(this.originalFlow);this.ctx.airwayPanel.cfdMode=false;
+      ++this.generation;++this.catalogRevision;this.clear();this.ctx.setFlow(this.originalFlow);this.ctx.airwayPanel.cfdMode=false;
       if(this.legacyColorMode==='thermal'){$('#flow-color').value='thermal';$('#flow-color').dispatchEvent(new Event('change'));}
       this.applyPlaybackControls(this.originalFlow);
       clearTimeout(this.timer);clearTimeout(this.geometryTimer);this.ctx.airwayPanel.chart.hidden=false;this.lab.update();
@@ -231,8 +294,10 @@ export class CFDLab {
     this.referenceSurface=preserveSurface&&!!this.surface;
     if(this.enabled)this.ctx.setFlow(null);
   }
-  changed(){
+  changed({force=false}={}){
     if(!this.enabled)return;
+    const request=this.request();
+    if(!force&&this.result?.request&&this.particles&&!this.particles.error&&libraryKey(this.result.request)===libraryKey(request))return;
     // Invalidate the simulated readings immediately, but keep the last airway
     // as a plain reference while looking for a replacement recording.
     const generation=++this.generation;this.clear({preserveSurface:true});this.result=null;this.job=null;
@@ -242,17 +307,17 @@ export class CFDLab {
     $('#cfd-wall-legend').hidden=true;$('#cfd-wall-reading').textContent='';$('#cfd-thermal-status').textContent='Checking recorded 3-D wall temperatures…';
     $('#cfd-wall-probe').textContent='Wall readings unavailable until a matching thermal recording loads.';
     $('#cfd-geometry-status').textContent='Checking recorded 3-D geometry…'+referenceNote;
-    this.ctx.airwayPanel.setCFD(null,'Controls changed · looking for a recorded 3-D field');
-    $('#cfd-result').replaceChildren();$('#cfd-status').textContent='No matching recorded 3-D field · checking saved results…';
-    $('#flow-stats').textContent=MISSING_CFD;
-    $('#scenario-flow-status').textContent='No matching recorded 3-D field';
+    this.ctx.airwayPanel.setCFD(null,this.selectedRecording?'Loading selected recording…':'Controls changed · looking for a recorded 3-D field');
+    $('#cfd-result').replaceChildren();$('#cfd-status').textContent=this.selectedRecording?'Loading selected recording…':'No matching recorded 3-D field · checking saved results…';
+    $('#flow-stats').textContent=this.selectedRecording?'Loading selected CFD recording…':MISSING_CFD;
+    $('#scenario-flow-status').textContent=this.selectedRecording?'Loading selected recording…':'No matching recorded 3-D field';
     $('#scenario-flow-toggle').disabled=true;
     $('#flow-sec h2 .hint').textContent='recorded 3-D CFD · checking library';
     $('#flow-phase').textContent='';
     clearTimeout(this.timer);
     this.timer=setTimeout(async()=>{
       try{
-        const request=this.request();const job=await this.library.lookup(request);
+        const job=await this.library.lookup(request);
         if(generation!==this.generation)return;
         await this.observe(job,generation);
         if(job.state==='missing'){$('#cfd-geometry-status').textContent='No recorded 3-D CFD geometry for these settings.'+referenceNote;$('#cfd-thermal-status').textContent='No recorded 3-D wall temperatures for these settings.';}

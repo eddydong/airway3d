@@ -14,6 +14,9 @@ test('airflow mode switch names the calculation without calling the 3-D picture 
   assert.ok(html.includes(AIRFLOW_INTRO));
   assert.equal(html.includes('1-D preview'),false);
   assert.ok(html.includes('id="cfd-recording-ui"'));
+  assert.ok(html.includes('id="cfd-recording"'));
+  assert.ok(html.includes('Solved scenario'));
+  assert.ok(html.includes('data-cfd-position="left"'));
   assert.match(TUBE_ESTIMATE_NOTE,/1-D pipe calculation/);
   assert.match(MISSING_CFD,/live tube estimate/);
 });
