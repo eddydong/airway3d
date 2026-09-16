@@ -6,6 +6,7 @@ Source arrays are slice Z, image Y, image X; solver arrays and geometry
 coordinates are world X,Y,Z in millimetres.
 """
 from __future__ import annotations
+from collections import deque
 import hashlib
 import json
 from pathlib import Path
@@ -212,6 +213,71 @@ def flatten_nostrils(domain, ports, exterior):
     return out
 
 
+def connect_missing_ports(domain, walkable, ports):
+    """Restore a 6-connected path when voxel swelling pinches a still-patent nostril.
+
+    The 1-D tube model can keep a millimetre-scale lumen that a 0.7 mm stair-step
+    plus regularization splits. Walking the pre-swelling lumen joins the nostril
+    without reopening the rest of the prescribed wall motion.
+    """
+    restored = 0
+    neigh = ((1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1))
+    nz, ny, nx = domain.shape
+    for pid in (1, 2):
+        if (domain & (ports == pid)).any():
+            continue
+        seeds = [tuple(p) for p in np.argwhere(walkable & (ports == pid))]
+        if not seeds:
+            continue
+        prev = {}; seen = set(seeds); queue = deque(seeds); hit = None
+        while queue:
+            x = queue.popleft()
+            if domain[x]:
+                hit = x; break
+            i, j, k = x
+            for di, dj, dk in neigh:
+                y = (i+di, j+dj, k+dk)
+                if y in seen or not (0 <= y[0] < nz and 0 <= y[1] < ny and 0 <= y[2] < nx):
+                    continue
+                if not walkable[y]:
+                    continue
+                seen.add(y); prev[y] = x; queue.append(y)
+        if hit is None:
+            continue
+        cur = prev.get(hit)
+        while cur is not None:
+            if not domain[cur]:
+                domain[cur] = True; restored += 1
+            cur = prev.get(cur)
+    return restored
+
+
+def keep_opening_components(repaired, ports):
+    """Do not drop a nostril or outlet that regularization split off the largest body."""
+    lab, n = ndi.label(repaired)
+    counts = np.bincount(lab.ravel()); counts[0] = 0
+    if not counts.any():
+        raise ValueError('No patent airway remains')
+    keep = {int(counts.argmax())}
+    for pid in (1, 2, 3):
+        for i in np.unique(lab[ports == pid]):
+            if i:
+                keep.add(int(i))
+    domain = np.isin(lab, list(keep))
+    return domain, int(repaired.sum() - domain.sum())
+
+
+def repair_collar_manifold(domain, added, score):
+    """Nostril-collar extrusion can leave edge-adjacent voxels; keep the collar."""
+    if not added.any():
+        return domain, 0
+    pref = np.where(domain, np.maximum(score, 1.0), -1.0)
+    pref[added] = float(np.max(pref)) + 10
+    domain, n = repair_edge_contacts(domain, pref)
+    domain, extra = regularize(domain, pref)
+    return domain, n + extra.get('diagonalVoxelsRemoved', 0) + extra.get('cornerVoxelsRemoved', 0)
+
+
 def build_domain(settings=None, spacing_mm=.7, threshold_offset=0, subdivisions=2, flat_nostrils=False):
     source_path = prepare_source()
     with np.load(source_path) as src:
@@ -239,12 +305,8 @@ def build_domain(settings=None, spacing_mm=.7, threshold_offset=0, subdivisions=
     score += threshold_offset
     score = score.reshape(shape)
     candidate = score > 0
+    base_lumen = candidate if not settings else ((score.reshape(-1) - offset) > 0).reshape(shape)
     repaired, repairs = regularize(candidate,score)
-    lab,n = ndi.label(repaired)
-    counts = np.bincount(lab.ravel()); counts[0] = 0
-    if not counts.any(): raise ValueError('No patent airway remains')
-    domain = lab == counts.argmax()
-    discarded = int(repaired.sum()-domain.sum())
     port_distance, indices = ndi.distance_transform_edt(src['ports']==0,sampling=sp,return_indices=True)
     nearest = src['ports'][tuple(indices)]
     d = ndi.map_coordinates(port_distance,sample,order=1,mode='nearest').reshape(shape)
@@ -253,13 +315,23 @@ def build_domain(settings=None, spacing_mm=.7, threshold_offset=0, subdivisions=
     ports[d > max(spacing_mm*1.6,.8)] = 0
     # Outlet lies on inferior scan cut; no artificial connection to exterior.
     ports[(np.indices(shape)[1] > 1) & (ports==3)] = 0
-    collar = flatten_nostrils(domain,ports,exterior) if flat_nostrils else None
+    domain, discarded = keep_opening_components(repaired, ports)
+    restored = connect_missing_ports(domain, base_lumen | domain, ports)
+    collar = None
+    if flat_nostrils:
+        before = domain.copy()
+        collar = flatten_nostrils(domain,ports,exterior)
+        domain, collar_repair = repair_collar_manifold(domain, domain & ~before, score)
+        repairs = dict(repairs, collarManifoldVoxelsRemoved=collar_repair)
+        domain, dropped = keep_opening_components(domain, ports)
+        discarded += dropped
+        restored += connect_missing_ports(domain, base_lumen | domain, ports)
     ident = digest(VERSION.encode()+domain.tobytes()+ports.tobytes()+exterior.tobytes()+np.asarray([*origin,spacing_mm],dtype='<f8').tobytes())
     audit = dict(version=VERSION,sourceHash=str(src['source_hash']),geometryHash=ident,
                  source='CT PNG screenshots; supine',clinicalReview=False,
                  spacingMm=spacing_mm,cells=int(domain.sum()),volumeCc=float(domain.sum()*spacing_mm**3/1000),
                  sourceVolumeCc=float(mask.sum()*np.prod(sp)/1000),
-                 **repairs,disconnectedVoxelsRemoved=discarded,
+                 **repairs,disconnectedVoxelsRemoved=discarded,splitPassageVoxelsRestored=int(restored),
                  prescribedWallMotion=bool(settings and np.any(offset)),
                  sourceExteriorContacts=2,expectedOpenings=['left_nostril','right_nostril','outlet'],
                  uncertainty='Screenshot window clipping, inferred in-plane scale, segmentation and voxel-wall discretization. No tissue mechanics or clinical validation.')
