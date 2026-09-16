@@ -88,8 +88,12 @@ def open_nostrils(body, airway, depth_mm, spacing):
     return out
 
 
-def mask_to_mesh(mask, spacing, shape, centre, sigma, target_faces, min_component_vox=0, step=1):
-    """Smooth a binary mask into a scalar field, extract the 0.5 iso-surface, decimate."""
+def mask_to_mesh(mask, spacing, shape, centre, sigma, target_faces, min_component_vox=0, step=1, field="gaussian"):
+    """Smooth a binary mask into a scalar field, extract the 0.5 iso-surface, decimate.
+
+    field='gaussian' is the display path for bulky tissues. field='sdf' follows the
+    signed voxel distance so a one-voxel-wide lumen still crosses the iso-level.
+    """
     if min_component_vox:
         lab, n = ndi.label(mask)
         if n:
@@ -99,24 +103,38 @@ def mask_to_mesh(mask, spacing, shape, centre, sigma, target_faces, min_componen
             mask = keep[lab]
     if not mask.any():
         return None
-    field = ndi.gaussian_filter(mask.astype(np.float32), sigma=sigma)
+    if field == "sdf":
+        scalar = ndi.distance_transform_edt(mask) - ndi.distance_transform_edt(~mask)
+        if np.any(np.asarray(sigma) > 0):
+            scalar = ndi.gaussian_filter(scalar.astype(np.float32), sigma)
+        pad_value = float(min(scalar.min(), -1.0))
+        field_vol = np.pad(scalar, 1, mode="constant", constant_values=pad_value)
+        level = 0.0
+    else:
+        field_vol = np.pad(ndi.gaussian_filter(mask.astype(np.float32), sigma=sigma), 1)
+        level = 0.5
     # pad so surfaces touching the volume border are closed
-    field = np.pad(field, 1)
-    verts, faces, _, _ = measure.marching_cubes(field, level=0.5, spacing=(1.0, 1.0, 1.0), step_size=step)
+    verts, faces, _, _ = measure.marching_cubes(field_vol, level=level, spacing=(1.0, 1.0, 1.0), step_size=step)
     verts -= 1.0  # undo padding
     original_verts, original_faces = verts, faces
+    m = None
     if fast_simplification is not None and len(faces) > target_faces:
-        red = 1.0 - target_faces / len(faces)
-        verts, faces = fast_simplification.simplify(verts.astype(np.float32), faces.astype(np.int64), red)
-    world = idx_to_world(verts, spacing, shape, centre)
-    m = trimesh.Trimesh(vertices=world, faces=faces, process=True)
-    # Decimation can join distinct surface fans across a narrow passage.
-    # Closed source masks must remain watertight after display simplification.
-    # Fall back to the extracted surface instead of silently shipping damage.
-    if not m.is_watertight and faces is not original_faces:
-        log('decimation broke surface topology; retaining original extraction')
-        world = idx_to_world(original_verts, spacing, shape, centre)
-        m = trimesh.Trimesh(vertices=world, faces=original_faces, process=True)
+        full_red = 1.0 - target_faces / len(faces)
+        for red in (full_red, 0.5 * full_red, 0.25 * full_red):
+            if red <= 0.02:
+                break
+            v2, f2 = fast_simplification.simplify(verts.astype(np.float32), faces.astype(np.int64), red)
+            world = idx_to_world(v2, spacing, shape, centre)
+            trial = trimesh.Trimesh(vertices=world, faces=f2, process=True)
+            if field != "sdf" or trial.is_watertight:
+                verts, faces, m = v2, f2, trial
+                break
+        if m is None:
+            log('decimation broke surface topology; retaining original extraction')
+            verts, faces = original_verts, original_faces
+    if m is None:
+        world = idx_to_world(verts, spacing, shape, centre)
+        m = trimesh.Trimesh(vertices=world, faces=faces, process=True)
     # Consistent winding, then each watertight body oriented outwards by the sign of its volume.
     # The winding pass propagates from an arbitrary face per body, so a body can come out
     # consistently inside-out when decimation flipped that face: its front faces then point
@@ -201,12 +219,12 @@ def main(dataset="pre"):
         meshes["bone"] = export_mesh(m, out / "bone.glb")
         log("bone", meshes["bone"])
         del bone_f
-    m = mask_to_mesh(airway_f, spf, shape_f, centre_f, (0.5, 0.9, 0.9), 300_000, 0)
+    m = mask_to_mesh(airway_f, spf, shape_f, centre_f, (0.35, 0.45, 0.45), 300_000, 0, field="sdf")
     meshes["airway"] = export_mesh(m, out / "airway.glb")
     log("airway", meshes["airway"])
     if side_f is not None:
         for key, sid in (("airway_L", 1), ("airway_R", 2), ("airway_common", 3)):
-            m = mask_to_mesh(side_f == sid, spf, shape_f, centre_f, (0.5, 0.9, 0.9), 200_000, 0)
+            m = mask_to_mesh(side_f == sid, spf, shape_f, centre_f, (0.35, 0.45, 0.45), 200_000, 0, field="sdf")
             if m is not None:
                 meshes[key] = export_mesh(m, out / f"{key}.glb")
                 log(key, meshes[key])

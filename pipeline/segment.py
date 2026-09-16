@@ -25,6 +25,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config as C  # noqa: E402
 
 T_AIR, T_FAT, T_BONE = 22, 53, 96  # gray thresholds (see build_volume histogram)
+# Weak air on the fine grid: partial-volume lumen darker than fat, still connected
+# to the conducting airway. Gray 28 ≈ −185 display-equivalent HU on C400/W1500.
+T_AIR_WEAK = 28
+AIRWAY_ENVELOPE_MM = 2.5  # coarse airway → fine ROI; was 1 mm and missed wall voxels
 T0 = time.time()
 
 
@@ -35,13 +39,19 @@ def log(*a):
 # ---------- anisotropic morphology via distance transforms ----------
 def dilate_mm(mask, r, sp):
     if r <= 0:
-        return mask.copy()
+        return np.asarray(mask, dtype=bool).copy()
+    mask = np.asarray(mask, dtype=bool)
+    if not mask.any():
+        return np.zeros_like(mask, dtype=bool)
     return ndi.distance_transform_edt(~mask, sampling=sp) <= r
 
 
 def erode_mm(mask, r, sp):
     if r <= 0:
-        return mask.copy()
+        return np.asarray(mask, dtype=bool).copy()
+    mask = np.asarray(mask, dtype=bool)
+    if not mask.any():
+        return np.zeros_like(mask, dtype=bool)
     return ndi.distance_transform_edt(mask, sampling=sp) > r
 
 
@@ -78,6 +88,66 @@ def fill_3d_capped(mask):
     """3D hole fill with the top/bottom z faces treated as solid walls."""
     m = np.pad(mask, ((1, 1), (0, 0), (0, 0)), constant_values=True)
     return ndi.binary_fill_holes(m)[1:-1]
+
+
+def upsample_mask(mask, out_shape, factor):
+    """Repeat a coarse (z,y,x) mask onto a finer in-plane grid."""
+    u = np.repeat(np.repeat(np.asarray(mask, dtype=bool), factor, axis=1), factor, axis=2)
+    out = np.zeros(out_shape, dtype=bool)
+    h, w = min(u.shape[1], out_shape[1]), min(u.shape[2], out_shape[2])
+    out[:, :h, :w] = u[:, :h, :w]
+    return out
+
+
+def downsample_any(mask, out_shape, factor):
+    """Coarse voxel is True if any child fine voxel is True."""
+    out = np.zeros(out_shape, dtype=bool)
+    h, w = (mask.shape[1] // factor) * factor, (mask.shape[2] // factor) * factor
+    if h == 0 or w == 0:
+        return out
+    pooled = np.asarray(mask, dtype=bool)[:, :h, :w].reshape(
+        mask.shape[0], h // factor, factor, w // factor, factor
+    ).any(axis=(2, 4))
+    out[:, : pooled.shape[1], : pooled.shape[2]] = pooled
+    return out
+
+
+def downsample_majority(mask, out_shape, factor, frac=0.5):
+    """Coarse voxel follows the fine mask when at least `frac` of children agree."""
+    out = np.zeros(out_shape, dtype=bool)
+    h, w = (mask.shape[1] // factor) * factor, (mask.shape[2] // factor) * factor
+    if h == 0 or w == 0:
+        return out
+    pooled = np.asarray(mask, dtype=bool)[:, :h, :w].reshape(
+        mask.shape[0], h // factor, factor, w // factor, factor
+    ).mean(axis=(2, 4)) >= frac
+    out[:, : pooled.shape[1], : pooled.shape[2]] = pooled
+    return out
+
+
+def refine_conducting_airway(gray, coarse_airway, coarse_sinus, spacing_fine, spacing_coarse,
+                             t_strong=T_AIR, t_weak=T_AIR_WEAK, envelope_mm=AIRWAY_ENVELOPE_MM):
+    """Fine conducting lumen from native air, using coarse labels only as ROI/identity.
+
+    Coarse airway/sinus say which cavity is which. Fine intensities place the wall.
+    A wider envelope recovers partial-volume lumen the coarse grid dropped. Large
+    sinus cavities stay excluded. Every fragment that touches the coarse airway is
+    kept, so a narrower side is not deleted just because it is not the largest.
+    """
+    factor = int(round(spacing_coarse[1] / spacing_fine[1]))
+    region = upsample_mask(dilate_mm(coarse_airway, envelope_mm, spacing_coarse), gray.shape, factor)
+    sinus_keepout = upsample_mask(coarse_sinus, gray.shape, factor)
+    strong = (gray < t_strong) & region & ~sinus_keepout
+    weak = (gray < t_weak) & region & ~sinus_keepout
+    grown = ndi.binary_propagation(strong, mask=weak) if strong.any() else weak
+    seed = upsample_mask(coarse_airway, gray.shape, factor) & grown
+    if not seed.any():
+        grown, _ = largest_cc(grown)
+        return grown
+    lab, _ = ndi.label(grown)
+    keep = np.unique(lab[seed])
+    keep = keep[keep > 0]
+    return np.isin(lab, keep) if keep.size else grown
 
 
 def remove_small(mask, min_vox):
@@ -313,27 +383,27 @@ def main():
     labels[airway] = 7
     labels[air & ~airway & ~sinus] = 0
     labels[~head_filled & ~airway] = 0  # anything outside the head is background
+
+    # ---------- fine-grid airway & sinuses ----------
+    # Native-resolution air inside a generous conducting ROI. Coarse labels keep
+    # maxillary/ethmoid air out; hysteresis recovers partial-volume walls.
+    airway_f = refine_conducting_airway(vfs, airway, sinus, spf, sp)
+    sinus_f = (vfs < T_AIR) & upsample_mask(dilate_mm(sinus, 0.8, sp), vf.shape, f) & ~airway_f
+    airway_c = downsample_majority(airway_f, labels.shape, f)
+    protected = np.isin(labels, [4, 5, 6, 9])  # bone / brain / eyes / teeth
+    labels[labels == 7] = 0
+    labels[airway_c & ~protected] = 7
+    sinus_c = downsample_majority(sinus_f, labels.shape, f) & ~airway_c
+    labels[labels == 8] = 0
+    labels[sinus_c & ~protected] = 8
     np.save(C.WORK_DIR / "labels_coarse.npy", labels)
+    np.save(C.WORK_DIR / "airway_fine.npy", airway_f)
+    np.save(C.WORK_DIR / "sinus_fine.npy", sinus_f)
 
     stats = {int(k): dict(name=v["name"], volume_cc=float((labels == k).sum() * vox_mm3 / 1000)) for k, v in C.LABELS.items()}
     stats_out = dict(classes=stats, eyes=found, spacing_mm=list(sp))
-    log("label volumes (cc):", {v["name"]: round(v["volume_cc"], 1) for v in stats.values()})
-
-    # ---------- fine-grid airway & sinuses ----------
-    air_f = vfs < T_AIR
-    def up(m):
-        u = np.repeat(np.repeat(m, f, axis=1), f, axis=2)
-        out = np.zeros(vf.shape, bool)
-        h, w = min(u.shape[1], vf.shape[1]), min(u.shape[2], vf.shape[2])
-        out[:, :h, :w] = u[:, :h, :w]
-        return out
-    aw_region = up(dilate_mm(airway, 1.0, sp))
-    airway_f = air_f & aw_region
-    airway_f, _ = largest_cc(airway_f)
-    sinus_f = air_f & up(dilate_mm(sinus, 0.8, sp)) & ~airway_f
-    np.save(C.WORK_DIR / "airway_fine.npy", airway_f)
-    np.save(C.WORK_DIR / "sinus_fine.npy", sinus_f)
     stats_out["airway_fine_cc"] = float(airway_f.sum() * np.prod(spf) / 1000)
+    log("label volumes (cc):", {v["name"]: round(v["volume_cc"], 1) for v in stats.values()})
     log("fine airway %.1f cc" % stats_out["airway_fine_cc"])
     json.dump(stats_out, open(C.WORK_DIR / "segment_stats.json", "w"), indent=1)
     log("done")

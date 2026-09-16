@@ -103,20 +103,25 @@ def profile(mask, dist, sp, centre, nz, step=1.0):
     cx = np.bincount(k, pts[:, 0], minlength=nst) / np.maximum(cnt, 1)
     cy = np.bincount(k, pts[:, 1], minlength=nst) / np.maximum(cnt, 1)
     cz = np.bincount(k, pts[:, 2], minlength=nst) / np.maximum(cnt, 1)
-    # smoothing (3-station median + 1.5 mm Gaussian) to suppress voxelisation noise, which
-    # would otherwise show up as spurious expansion/contraction losses in the 1-D model
-    area_s = ndi.gaussian_filter1d(ndi.median_filter(area, 3, mode="nearest"), 1.5, mode="nearest")
-    per_s = ndi.gaussian_filter1d(ndi.median_filter(per, 3, mode="nearest"), 1.5, mode="nearest")
-    hyd = 4.0 * area_s / np.maximum(per_s, 1e-6)
+    # Display curve only. Median+Gaussian smoothing erased real 1 mm stenoses
+    # (a 20 mm² dip in a 100 mm² tube reported as 100 mm²). Hydraulics and MCA
+    # use the raw shell areas; keep a lightly smoothed copy for the plot.
+    area_s = ndi.gaussian_filter1d(area, 0.35, mode="nearest")
+    per_s = ndi.gaussian_filter1d(per, 0.35, mode="nearest")
+    hyd = 4.0 * area / np.maximum(per, 1e-6)
     s = (np.arange(nst) + 0.5) * step
     centers = np.c_[cx, cy, cz]
-    # centreline for display: stop where the shell centroid jumps (last shells sit in dead-end
-    # pockets such as the olfactory cleft rather than on the main path)
+    # Partial inlet/outlet shells are not anatomical sections. They used to be
+    # hidden by median smoothing; crop them so MCA and hydraulics stay consistent.
+    keep = (s >= 3.0) & (s <= s[-1] - 4.0)
+    if int(keep.sum()) >= 3:
+        s, area, area_s, per, hyd, centers = s[keep], area[keep], area_s[keep], per[keep], hyd[keep], centers[keep]
     jumps = np.linalg.norm(np.diff(centers, axis=0), axis=1)
     bad = np.nonzero(jumps > 5.0)[0]
-    n_ok = int(bad[0] + 1) if len(bad) else nst
-    return dict(s_mm=s.round(2).tolist(), area_mm2=area_s.round(2).tolist(), perimeter_mm=per_s.round(2).tolist(),
-                hyd_diam_mm=hyd.round(3).tolist(), centers=centers.round(2).tolist(), n_centerline=n_ok)
+    n_ok = int(bad[0] + 1) if len(bad) else len(s)
+    return dict(s_mm=s.round(2).tolist(), area_mm2=area.round(2).tolist(), area_mm2_smooth=area_s.round(2).tolist(),
+                perimeter_mm=per.round(2).tolist(), hyd_diam_mm=hyd.round(3).tolist(),
+                centers=centers.round(2).tolist(), n_centerline=n_ok)
 
 
 def bbox(mask, pad=2):
@@ -184,10 +189,9 @@ def side_summary(mask, dist, sp, prof, sp_vol):
         return out
     s = np.array(prof["s_mm"]); a = np.array(prof["area_mm2"])
     out["length_mm"] = float(s[-1] + 0.5)
-    lo = (s >= 3.0) & (s <= s[-1] - 4.0)  # ignore partial shells at the inlet and the domain end
-    i = int(np.argmin(np.where(lo, a, np.inf)))
+    i = int(np.argmin(a))
     out.update(min_area_mm2=float(a[i]), min_area_at_mm=float(s[i]), min_area_index=i, min_area_pos=prof["centers"][i],
-               mean_area_mm2=float(a[lo].mean()))
+               mean_area_mm2=float(a.mean()))
     return out
 
 
